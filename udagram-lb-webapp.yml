@@ -23,6 +23,8 @@ Resources:
       Path: /
   RolePolicies: 
     Type: "AWS::IAM::Policy"
+    DependsOn:
+      - WebAppLaunchConfig
     Properties: 
       PolicyName: "root"
       PolicyDocument: 
@@ -59,6 +61,41 @@ Resources:
         FromPort: 80
         ToPort: 80
         CidrIp: 0.0.0.0/0
+  BastionServerSecGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow SSH traffic to Bastian Host and SSH from local only
+      VpcId:
+        Fn::ImportValue:
+          !Sub "${EnvironmentName}-VPCID"
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp: 0.0.0.0/0
+  BastionServer:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-087c2c50437d0b80d
+      KeyName: jumpbox-key
+      InstanceType: t2.micro
+      NetworkInterfaces: 
+      - AssociatePublicIpAddress: "true"
+        DeviceIndex: "0"
+        GroupSet: 
+          - Ref: "BastionServerSecGroup"
+        SubnetId: 
+          Fn::ImportValue:
+            !Sub ${EnvironmentName}-PUB1-SN
+      BlockDeviceMappings:
+      - DeviceName: "/dev/sdk"
+        Ebs:
+          VolumeSize: '1'
   WebServerSecGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -68,8 +105,8 @@ Resources:
           !Sub "${EnvironmentName}-VPCID"
       SecurityGroupIngress:
       - IpProtocol: tcp
-        FromPort: 8080
-        ToPort: 8080
+        FromPort: 80
+        ToPort: 80
         CidrIp: 0.0.0.0/0
       - IpProtocol: tcp
         FromPort: 22
@@ -91,10 +128,9 @@ Resources:
           apt-get install apache2 -y
           systemctl start apache2.service
           cd /var/www/html
-          aws s3 cp s3://udacity-demo-1/udacityoch.zip .
-          unzip -o udacity.zip
+          aws s3 cp s3://och-udacity-demo-1/Proj2Udagram.zip .
+          unzip -o Proj2Udagram.zip
       ImageId: ami-0d1cd67c26f5fca19
-      KeyName: private-server-devops-key
       SecurityGroups:
       - Ref: WebServerSecGroup
       InstanceType: t2.medium
@@ -109,7 +145,7 @@ Resources:
     Properties:
       VPCZoneIdentifier:
       - Fn::ImportValue: 
-          !Sub "${EnvironmentName}-PUB-NETS"
+          !Sub "${EnvironmentName}-PRIV-NETS"
       LaunchConfigurationName:
         Ref: WebAppLaunchConfig
       MinSize: '4'
@@ -154,9 +190,15 @@ Resources:
       HealthCheckProtocol: HTTP
       HealthCheckTimeoutSeconds: 8
       HealthyThresholdCount: 2
-      Port: 8080
+      Port: 80
       Protocol: HTTP
       UnhealthyThresholdCount: 5
       VpcId: 
         Fn::ImportValue:
           Fn::Sub: "${EnvironmentName}-VPCID"
+Outputs:
+  LoadBalancerDNSNameURL:
+    Description: The DNSName URL of the load balancer
+    Value: !Join [ "", ["http://", !GetAtt WebAppLB.DNSName ]]
+    Export:
+      Name: !Sub ${EnvironmentName}-Website
